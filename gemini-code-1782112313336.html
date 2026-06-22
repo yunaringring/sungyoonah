@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Desert Sandboard Odyssey</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #e5a65d;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 24px;
+        }
+        .score-box {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            pointer-events: auto;
+        }
+        .screen-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(43, 30, 56, 0.85);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        h1 {
+            color: #ffbe76;
+            font-size: 36px;
+            margin-bottom: 12px;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+        p {
+            color: #f5f6fa;
+            font-size: 16px;
+            margin-bottom: 36px;
+            text-align: center;
+            padding: 0 24px;
+            line-height: 1.6;
+        }
+        .btn {
+            background: #ff7675;
+            color: #fff;
+            border: none;
+            padding: 16px 48px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 6px 18px rgba(255, 118, 117, 0.4);
+            transition: transform 0.1s ease;
+            pointer-events: auto;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+        #gameOverScreen {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div class="ui-layer">
+            <div class="score-box" id="scoreDisplay">0 m</div>
+        </div>
+
+        <div id="startScreen" class="screen-overlay">
+            <h1>사막 오디세이</h1>
+            <p>화면을 터치하면 점프합니다.<br>공중에 있을 때 터치를 유지하면 공중회전(백플립)을 합니다.<br>바위와 낙하 사고를 피해 질주하세요!</p>
+            <button class="btn" id="startBtn">여정 시작</button>
+        </div>
+
+        <div id="gameOverScreen" class="screen-overlay">
+            <h1>여정 종료</h1>
+            <p id="finalScoreDisplay">이동 거리: 0 m</p>
+            <button class="btn" id="restartBtn">다시 시작</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreDisplay = document.getElementById('finalScoreDisplay');
+        
+        let isPlaying = false;
+        let score = 0;
+        let gameSpeed = 5;
+        let obstacles = [];
+        let obstacleTimer = 0;
+        let terrainOffset = 0;
+        let isTouching = false;
+
+        const player = {
+            x: 100,
+            y: 0,
+            radius: 12,
+            vy: 0,
+            gravity: 0.4,
+            jumpForce: -8,
+            angle: 0,
+            rotationSpeed: 0.07,
+            isGrounded: false,
+            targetAngle: 0
+        };
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
