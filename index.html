@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Desert Sandboard Odyssey</title>
+    <title>Mountain Trail Odyssey</title>
     <style>
         * {
             margin: 0;
@@ -17,7 +17,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #e5a65d;
+            background-color: #5b7a99;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         #gameContainer {
@@ -107,15 +107,15 @@
 
     <div id="gameContainer">
         <canvas id="gameCanvas"></canvas>
-        
+
         <div class="ui-layer">
             <div class="score-box" id="scoreDisplay">0 m</div>
         </div>
 
         <div id="startScreen" class="screen-overlay">
-            <h1>사막 오디세이</h1>
-            <p>화면을 터치하면 점프합니다.<br>공중에 있을 때 터치를 유지하면 공중회전(백플립)을 합니다.<br>바위와 낙하 사고를 피해 질주하세요!</p>
-            <button class="btn" id="startBtn">여정 시작</button>
+            <h1>산길 질주 오디세이</h1>
+            <p>화면을 터치하면 강아지가 점프합니다.<br>공중에 있을 때 터치를 유지하면 공중회전(백플립)을 합니다.<br>산길의 돌부리를 피해 신나게 질주하세요!</p>
+            <button class="btn" id="startBtn">질주 시작</button>
         </div>
 
         <div id="gameOverScreen" class="screen-overlay">
@@ -132,19 +132,27 @@
         const startScreen = document.getElementById('startScreen');
         const gameOverScreen = document.getElementById('gameOverScreen');
         const finalScoreDisplay = document.getElementById('finalScoreDisplay');
-        
+        const startBtn = document.getElementById('startBtn');
+        const restartBtn = document.getElementById('restartBtn');
+
         let isPlaying = false;
         let score = 0;
         let gameSpeed = 5;
+        const MAX_SPEED = 16;
         let obstacles = [];
         let obstacleTimer = 0;
         let terrainOffset = 0;
         let isTouching = false;
+        let groundY = 0;
+        let animationId = null;
+        let runCycle = 0;
+        let bgPhase = 0;
+        let groundDashOffset = 0;
 
         const player = {
             x: 100,
             y: 0,
-            radius: 12,
+            radius: 16,
             vy: 0,
             gravity: 0.4,
             jumpForce: -8,
@@ -156,3 +164,346 @@
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            groundY = canvas.height * 0.7;
+            if (!isPlaying) {
+                player.y = groundY - player.radius;
+            }
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function resetGame() {
+            score = 0;
+            gameSpeed = 5;
+            obstacles = [];
+            obstacleTimer = 0;
+            terrainOffset = 0;
+            isTouching = false;
+            runCycle = 0;
+            bgPhase = 0;
+            groundDashOffset = 0;
+            player.y = groundY - player.radius;
+            player.vy = 0;
+            player.angle = 0;
+            player.isGrounded = true;
+            scoreDisplay.textContent = '0 m';
+        }
+
+        function spawnObstacle() {
+            const size = 18 + Math.random() * 16;
+            obstacles.push({
+                x: canvas.width + size,
+                y: groundY - size,
+                width: size,
+                height: size
+            });
+        }
+
+        function updatePlayer() {
+            // gravity & vertical motion
+            player.vy += player.gravity;
+            player.y += player.vy;
+
+            // ground collision
+            if (player.y >= groundY - player.radius) {
+                player.y = groundY - player.radius;
+                if (!player.isGrounded) {
+                    player.isGrounded = true;
+                    player.vy = 0;
+                    // snap rotation to nearest full flip on landing
+                    player.angle = 0;
+                }
+            } else {
+                player.isGrounded = false;
+                // spin while airborne and holding touch
+                if (isTouching) {
+                    player.angle -= player.rotationSpeed * 8;
+                } else {
+                    player.angle -= player.rotationSpeed * 2;
+                }
+            }
+        }
+
+        function updateObstacles() {
+            obstacleTimer++;
+            const spawnRate = Math.max(45, 90 - Math.floor(score / 10));
+            if (obstacleTimer > spawnRate) {
+                spawnObstacle();
+                obstacleTimer = 0;
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].x -= gameSpeed;
+                if (obstacles[i].x + obstacles[i].width < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        function checkCollisions() {
+            for (const obs of obstacles) {
+                const closestX = Math.max(obs.x, Math.min(player.x, obs.x + obs.width));
+                const closestY = Math.max(obs.y, Math.min(player.y, obs.y + obs.height));
+                const dx = player.x - closestX;
+                const dy = player.y - closestY;
+                const distSq = dx * dx + dy * dy;
+                if (distSq < player.radius * player.radius) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function drawBackground() {
+            // sky gradient
+            const sky = ctx.createLinearGradient(0, 0, 0, groundY);
+            sky.addColorStop(0, '#aee3f5');
+            sky.addColorStop(1, '#eaf6f0');
+            ctx.fillStyle = sky;
+            ctx.fillRect(0, 0, canvas.width, groundY);
+
+            // sun
+            ctx.beginPath();
+            ctx.arc(canvas.width - 100, 90, 36, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,250,210,0.7)';
+            ctx.fill();
+
+            // continuous scroll phase (never resets, so the ridgeline never pops/snaps)
+            bgPhase += gameSpeed;
+
+            drawRidge(bgPhase * 0.15, groundY - 60, 70, 0.006, '#bcd9c7');
+            drawRidge(bgPhase * 0.3, groundY - 20, 100, 0.009, '#8fb89e');
+
+            // ground (grass)
+            ctx.fillStyle = '#7cb37f';
+            ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+            ctx.fillStyle = '#6aa46e';
+            ctx.fillRect(0, groundY, canvas.width, 10);
+
+            // scrolling dirt path dashes
+            groundDashOffset -= gameSpeed;
+            if (groundDashOffset <= -80) groundDashOffset += 80;
+            ctx.fillStyle = '#d9c08a';
+            for (let x = groundDashOffset; x < canvas.width + 80; x += 80) {
+                ctx.fillRect(x, groundY + 24, 36, 6);
+            }
+        }
+
+        function drawRidge(offset, baseY, amplitude, freq, color) {
+            ctx.beginPath();
+            ctx.moveTo(0, baseY + amplitude);
+            for (let x = 0; x <= canvas.width; x += 12) {
+                const y = baseY - amplitude * Math.max(0,
+                    Math.sin((x + offset) * freq) * 0.6 + Math.sin((x + offset) * freq * 2.3) * 0.4
+                );
+                ctx.lineTo(x, y);
+                // snow cap
+                if (y < baseY - amplitude * 0.62) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(x, y, 12, amplitude * 0.12);
+                }
+            }
+            ctx.lineTo(canvas.width, groundY);
+            ctx.lineTo(0, groundY);
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle);
+
+            const r = player.radius;
+            const furColor = '#ffffff';
+            const shadeColor = '#eef0f2';
+            const earColor = '#ffd3e0';
+            const outline = '#d8d8de';
+
+            // legs (drawn first, behind body)
+            ctx.strokeStyle = furColor;
+            ctx.lineWidth = r * 0.45;
+            ctx.lineCap = 'round';
+            if (player.isGrounded) {
+                runCycle += 0.35;
+                const legSwing = Math.sin(runCycle) * (r * 0.45);
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.35, r * 0.55);
+                ctx.lineTo(-r * 0.35 + legSwing, r * 1.25);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(r * 0.35, r * 0.55);
+                ctx.lineTo(r * 0.35 - legSwing, r * 1.25);
+                ctx.stroke();
+            } else {
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.35, r * 0.55);
+                ctx.lineTo(-r * 0.15, r * 1.05);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(r * 0.35, r * 0.55);
+                ctx.lineTo(r * 0.15, r * 1.05);
+                ctx.stroke();
+            }
+            // paw tips
+            ctx.fillStyle = shadeColor;
+            ctx.beginPath();
+            ctx.arc(player.isGrounded ? -r * 0.35 + Math.sin(runCycle) * (r * 0.45) : -r * 0.15, r * 1.25, r * 0.18, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(player.isGrounded ? r * 0.35 - Math.sin(runCycle) * (r * 0.45) : r * 0.15, r * 1.25, r * 0.18, 0, Math.PI * 2);
+            ctx.fill();
+
+            // fluffy tail (little puff at the back)
+            ctx.fillStyle = furColor;
+            fluffyBlob(-r * 1.25, -r * 0.1, r * 0.42, 6);
+            ctx.strokeStyle = outline;
+            ctx.lineWidth = 1;
+
+            // fluffy round body
+            ctx.fillStyle = furColor;
+            fluffyBlob(0, r * 0.05, r * 1.0, 9);
+
+            // fluffy round head (slightly forward and up)
+            fluffyBlob(r * 0.55, -r * 0.55, r * 0.78, 9);
+
+            // ears (floppy, soft pink-cream)
+            ctx.fillStyle = earColor;
+            ctx.beginPath();
+            ctx.ellipse(r * 0.05, -r * 0.95, r * 0.28, r * 0.42, -0.4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(r * 1.05, -r * 0.95, r * 0.28, r * 0.42, 0.4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // snout
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.ellipse(r * 1.15, -r * 0.4, r * 0.36, r * 0.28, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // nose
+            ctx.fillStyle = '#3a3a40';
+            ctx.beginPath();
+            ctx.ellipse(r * 1.42, -r * 0.42, r * 0.1, r * 0.08, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // eyes
+            ctx.fillStyle = '#2b1e38';
+            ctx.beginPath();
+            ctx.arc(r * 0.55, -r * 0.62, r * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(r * 0.95, -r * 0.65, r * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+
+            // rosy cheeks
+            ctx.fillStyle = 'rgba(255,180,190,0.55)';
+            ctx.beginPath();
+            ctx.arc(r * 0.4, -r * 0.42, r * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function fluffyBlob(cx, cy, radius, bumps) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.fill();
+            for (let i = 0; i < bumps; i++) {
+                const angle = (i / bumps) * Math.PI * 2;
+                const bx = cx + Math.cos(angle) * radius * 0.82;
+                const by = cy + Math.sin(angle) * radius * 0.82;
+                ctx.beginPath();
+                ctx.arc(bx, by, radius * 0.32, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function drawObstacles() {
+            for (const obs of obstacles) {
+                const cx = obs.x + obs.width / 2;
+                const cy = obs.y + obs.height * 0.65;
+                ctx.fillStyle = '#9aa0a6';
+                ctx.beginPath();
+                ctx.ellipse(cx, cy, obs.width * 0.52, obs.height * 0.42, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#7d8389';
+                ctx.beginPath();
+                ctx.ellipse(cx - obs.width * 0.12, cy - obs.height * 0.12, obs.width * 0.3, obs.height * 0.22, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // small highlight
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(cx + obs.width * 0.1, cy - obs.height * 0.2, obs.width * 0.12, obs.height * 0.08, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function gameLoop() {
+            if (!isPlaying) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            updatePlayer();
+            updateObstacles();
+            drawBackground();
+            drawObstacles();
+            drawPlayer();
+
+            if (checkCollisions()) {
+                endGame();
+                return;
+            }
+
+            score += gameSpeed * 0.05;
+            gameSpeed = Math.min(MAX_SPEED, gameSpeed + 0.004);
+            scoreDisplay.textContent = Math.floor(score) + ' m';
+
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            resetGame();
+            isPlaying = true;
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function endGame() {
+            isPlaying = false;
+            if (animationId) cancelAnimationFrame(animationId);
+            finalScoreDisplay.textContent = '이동 거리: ' + Math.floor(score) + ' m';
+            gameOverScreen.style.display = 'flex';
+        }
+
+        function handleJump() {
+            if (!isPlaying) return;
+            if (player.isGrounded) {
+                player.vy = player.jumpForce;
+                player.isGrounded = false;
+            }
+        }
+
+        function onPointerDown(e) {
+            isTouching = true;
+            handleJump();
+        }
+        function onPointerUp(e) {
+            isTouching = false;
+        }
+
+        canvas.addEventListener('pointerdown', onPointerDown);
+        canvas.addEventListener('pointerup', onPointerUp);
+        canvas.addEventListener('pointercancel', onPointerUp);
+        canvas.addEventListener('pointerleave', onPointerUp);
+
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+    </script>
+</body>
+</html>
